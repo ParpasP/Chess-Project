@@ -150,7 +150,7 @@ def precompute_boards(game_df):
     return boards
 
 
-def interactive_game_viewer(result_df, game_id):
+def interactive_game_viewer(result_df, link_id):
     """
     Create an interactive board viewer for analyzing a specific game.
 
@@ -172,13 +172,9 @@ def interactive_game_viewer(result_df, game_id):
     >>> interactive_game_viewer(analysis_df, "abc123-def456")
     # Opens interactive widget - use the slider to move through the game
     """
-    game = (
-        result_df[result_df["link_id"] == game_id]
-        .sort_values("move_index")
-        .reset_index(drop=True)
-    )
-
+    game = result_df[result_df["link_id"] == link_id]
     boards = precompute_boards(game)
+    print(len(boards))
 
     def update(i):
         clear_output(wait=True)

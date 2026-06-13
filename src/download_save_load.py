@@ -23,7 +23,7 @@ from chessdotcom import get_player_game_archives, get_player_games_by_month, Cli
 load_dotenv()
 USER_AGENT = os.getenv("USER_AGENT")
 TIMEZONE = os.getenv("TIME_ZONE")
-print(os.environ.keys())
+
 # Configure Chess.com API
 Client.request_config["headers"]["User-Agent"] = USER_AGENT
 
@@ -42,6 +42,34 @@ def clock_to_seconds(clock_str) -> None | float:
         m, s = parts
         return int(m) * 60 + float(s)
     return None
+
+
+def extract_result(game, username):
+
+    my_result_raw = (
+        game["white"]["result"]
+        if game["white"]["username"] == username
+        else game["black"]["result"]
+    )
+
+    draw_results = {
+        "agreed",
+        "stalemate",
+        "repetition",
+        "timevsinsufficient",
+        "50move",
+        "insufficient",
+        "draw",
+    }
+
+    if my_result_raw == "win":
+        result = "Win"
+    elif my_result_raw in draw_results:
+        result = "Draw"
+    else:
+        result = "Loss"
+
+    return result, my_result_raw
 
 
 def extract_moves_with_time(pgn) -> dict:
@@ -75,28 +103,6 @@ def extract_eco_code(pgn) -> str:
     eco_code = eco_code_match.group(1) if eco_code_match else None
 
     return eco_code
-
-
-def extract_result(game, username=MY_CHESS_USERNAME) -> str:
-
-    my_result_raw = (
-        game["white"]["result"]
-        if game["white"]["username"] == username
-        else game["black"]["result"]
-    )
-
-    result = (
-        "Win"
-        if my_result_raw == "win"
-        else (
-            "Draw"
-            if my_result_raw
-            in ["agreed", "stalemate", "repetition", "timeout vs insufficient"]
-            else "Loss"
-        )
-    )
-
-    return result
 
 
 def construct_move_seq(pgn) -> str:
@@ -281,6 +287,8 @@ def process_and_save_chess_data(
                 black_rating = game["black"]["rating"]
                 rating_diff = None
 
+            result, raw_result = extract_result(game, username)
+
             # Game level data
             games_rows.append(
                 {
@@ -299,7 +307,8 @@ def process_and_save_chess_data(
                     "simple_opening": simplify_opening(opening_name),
                     "eco_code": extract_eco_code(pgn),
                     "my_color": my_color,
-                    "result": extract_result(game),
+                    "result": result,
+                    "raw_result": raw_result,
                     "white_accuracy": (
                         game["accuracies"]["white"] if "accuracies" in game else None
                     ),
@@ -483,7 +492,7 @@ def load_chess_dataframes(username, format=None) -> tuple[pd.DataFrame, pd.DataF
 # MAIN FUNCTION
 # ============================================================================
 def get_chess_dataframes(
-    username=MY_CHESS_USERNAME, force_reprocess=False, format="parquet", verbose=True
+    username=MY_CHESS_USERNAME, force_reprocess=False, format="csv", verbose=True
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Smart function that loads existing dataframes or processes them if needed.
