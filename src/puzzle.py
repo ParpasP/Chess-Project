@@ -79,6 +79,12 @@ def generate_chess_puzzles(result_df):
 
             uci_curr = (chess.Board(row_prev1["fen"])).parse_san(row_curr["move"]).uci()
 
+            clock_before = row_curr["clock_before"]
+
+            clock_after = row_curr["clock_after"]
+
+            thinking_time = row_curr["thinking_time"]
+
             puzzles.append(
                 {
                     "uuid": game_id,
@@ -91,6 +97,9 @@ def generate_chess_puzzles(result_df):
                     "played_move": row_curr["move"],
                     "eval_before": row_curr["eval_before"],
                     "eval_after": row_curr["eval_after"],
+                    "clock_before": clock_before,
+                    "clock_after": clock_after,
+                    "thinking_time": thinking_time,
                 }
             )
 

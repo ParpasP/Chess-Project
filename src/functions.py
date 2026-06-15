@@ -12,6 +12,50 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import *
 
 
+def plot_game(result_df, link_id):
+    """
+    Plot the evaluation graph for a single game.
+
+    Creates a line chart showing how the engine evaluation changed throughout the game.
+    Positive values = White advantage, Negative values = Black advantage.
+
+    Parameters:
+    -----------
+    result_df : pd.DataFrame
+        DataFrame containing analysis results with 'move_index', 'eval_after', 'link_id' columns
+    link_id : str or int
+        Unique identifier for the game (from the game's URL)
+
+    Example:
+    --------
+    >>> plot_game(analysis_df, "12345678")
+    """
+    link_id = str(link_id)
+    game = result_df[result_df["link_id"] == link_id]
+    my_color = "white" if game.iloc[0]["my_move"] else "black"
+    print(f"You played as {my_color}")
+    x = game["move_index"].values
+    y = game["eval_after"].values
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+
+    ax.plot(x, y, color="white", linewidth=0.01, zorder=3)
+
+    ax.set_xlim(x.min(), x.max())
+    ax.set_ylim(-1000, 1000)
+
+    ax.fill_between(x, y, 1000, color="black", alpha=0.8, zorder=1)
+
+    # optional reference
+    ax.axhline(0, color="grey", linewidth=1, zorder=4)
+
+    ax.set_title("Game review")
+    ax.set_xlabel("Move")
+    ax.set_ylabel("Evaluation")
+
+    plt.show()
+
+
 def get_best_move(board, engine):
     """
     Get Stockfish's recommended best move for the current position.

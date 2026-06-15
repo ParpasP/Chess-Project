@@ -148,6 +148,7 @@ def run_chess_analysis(
     # PROCESS
     # -----------------------------
     rows = []
+
     with tqdm(
         total=len(moves), desc="Analyzing moves", unit="move", colour="RED"
     ) as pbar:
@@ -155,6 +156,7 @@ def run_chess_analysis(
             board = chess.Board()
             game_df = game_df.sort_values("move_index", ascending=True)
             eval_current = 0
+            clock_before, clock_after = {}, {}
 
             for _, row in game_df.iterrows():
                 eval_before = eval_current
@@ -212,14 +214,35 @@ def run_chess_analysis(
                     )
                 )
 
+                total_time = float(row["time_control"].split("+")[0])
+                increment = (
+                    float(row["time_control"].split("+")[1])
+                    if "+" in row["time_control"]
+                    else 0
+                )
+
+                turn = row["turn"]
+
+                clock_before[turn] = (
+                    clock_after.get(turn) if row["move_no"] != 1 else total_time
+                )
+
+                clock_after[turn] = row["clock_sec"]
+
                 rows.append(
                     {
                         "link_id": row["link_id"],
                         "uuid": game_id,
                         "move_index": row["move_index"],
-                        "move_no": row["move_no"],
-                        "player": row["turn"],
+                        "move_no": int(row["move_no"]),
+                        "player": turn,
                         "move": row["move"],
+                        "clock_before": clock_before.get(turn),
+                        "clock_after": clock_after.get(turn),
+                        "thinking_time": round(
+                            clock_before.get(turn) - clock_after.get(turn) + increment,
+                            2,
+                        ),
                         "my_move": is_my_move,
                         "eval_before": eval_before,
                         "eval_after": eval_after,
@@ -269,7 +292,7 @@ def filter_games_by_time_control(
         return games_df
 
     if time_control in games_df["time_class"].unique():
-        return games_df[games_df["time_classl"] == time_control]
+        return games_df[games_df["time_class"] == time_control]
     else:
         print("❌ time_control not found")
         print("Available time_control values:", games_df["time_control"].unique())

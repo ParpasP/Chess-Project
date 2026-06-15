@@ -343,7 +343,7 @@ def process_and_save_chess_data(
                                     "link_id": game["url"].split("/")[-1],
                                     "time_class": game["time_class"],
                                     "time_control": game["time_control"],
-                                    "move_no": move_no,
+                                    "move_no": int(move_no),
                                     "move_index": move_index,
                                     "turn": turn,
                                     "move": move_text,
