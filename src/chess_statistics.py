@@ -475,6 +475,11 @@ BLUNDER_THRESHOLD = 300
 # ---------------------------------------------------------------------------------
 
 
+def plot_blunder_by_time(puzzles_df: pd.DataFrame) -> None:
+    
+    ...
+
+
 def blunders(result_df):
     """Scatter plots with severity of blunders"""
 

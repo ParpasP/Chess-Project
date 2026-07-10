@@ -13,20 +13,8 @@ from IPython.display import display, HTML, clear_output
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import *
-from src.functions import get_best_move, eval_bar_horizontal
+from src.functions import get_best_move, eval_bar_horizontal, get_engine, close_engine
 from src.cache import evaluate
-
-# -----------------------------
-# ENGINE (GLOBAL, SAFE)
-# -----------------------------
-engine = None
-
-
-def get_engine():
-    global engine
-    if engine is None:
-        engine = chess.engine.SimpleEngine.popen_uci(str(STOCKFISH_PATH))
-    return engine
 
 
 # -----------------------------
@@ -79,12 +67,6 @@ def generate_chess_puzzles(result_df):
 
             uci_curr = (chess.Board(row_prev1["fen"])).parse_san(row_curr["move"]).uci()
 
-            clock_before = row_curr["clock_before"]
-
-            clock_after = row_curr["clock_after"]
-
-            thinking_time = row_curr["thinking_time"]
-
             puzzles.append(
                 {
                     "uuid": game_id,
@@ -97,9 +79,6 @@ def generate_chess_puzzles(result_df):
                     "played_move": row_curr["move"],
                     "eval_before": row_curr["eval_before"],
                     "eval_after": row_curr["eval_after"],
-                    "clock_before": clock_before,
-                    "clock_after": clock_after,
-                    "thinking_time": thinking_time,
                 }
             )
 

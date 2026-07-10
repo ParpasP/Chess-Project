@@ -21,8 +21,17 @@ from src.cache import get_cache_key, load_evaluation_cache
 from chessdotcom import get_player_game_archives, get_player_games_by_month, Client
 
 load_dotenv()
-USER_AGENT = os.getenv("USER_AGENT")
-TIMEZONE = os.getenv("TIME_ZONE")
+USER_AGENT = os.getenv("USER_AGENT") or (
+    f"ChessAnalysisProject/1.0 (contact: {MY_CHESS_USERNAME}@chess.com; "
+    "purpose: personal chess.com game analysis)"
+)
+if not os.getenv("USER_AGENT"):
+    print(
+        "⚠️ No USER_AGENT set in .env — using a generic default. "
+        "Chess.com's API asks that requests identify a contact; "
+        "consider adding USER_AGENT to a .env file."
+    )
+TIMEZONE = os.getenv("TIME_ZONE") or "Europe/Amsterdam"
 
 # Configure Chess.com API
 Client.request_config["headers"]["User-Agent"] = USER_AGENT
@@ -42,34 +51,6 @@ def clock_to_seconds(clock_str) -> None | float:
         m, s = parts
         return int(m) * 60 + float(s)
     return None
-
-
-def extract_result(game, username):
-
-    my_result_raw = (
-        game["white"]["result"]
-        if game["white"]["username"] == username
-        else game["black"]["result"]
-    )
-
-    draw_results = {
-        "agreed",
-        "stalemate",
-        "repetition",
-        "timevsinsufficient",
-        "50move",
-        "insufficient",
-        "draw",
-    }
-
-    if my_result_raw == "win":
-        result = "Win"
-    elif my_result_raw in draw_results:
-        result = "Draw"
-    else:
-        result = "Loss"
-
-    return result, my_result_raw
 
 
 def extract_moves_with_time(pgn) -> dict:
@@ -97,12 +78,38 @@ def extract_moves_with_time(pgn) -> dict:
     return result
 
 
-def extract_eco_code(pgn) -> str:
-    pattern = r'\[ECOUrl ".*?/([^"]+)"\]'
-    eco_code_match = re.search(pattern, pgn)
-    eco_code = eco_code_match.group(1) if eco_code_match else None
+def extract_eco_code(pgn: str) -> str | None:
+    """Extract the standard ECO classification code (e.g. 'C30') from a PGN.
 
-    return eco_code
+    Reads the '[ECO "..."]' header tag directly. (Previously this parsed the
+    '[ECOUrl "..."]' tag instead, and the regex didn't account for the "//"
+    in "https://", so it captured almost the whole URL rather than the
+    opening slug — this returns the real A00-E99 ECO code instead.)
+    """
+    match = re.search(r'\[ECO "([^"]+)"\]', pgn)
+    return match.group(1) if match else None
+
+
+def extract_result(game, username=MY_CHESS_USERNAME) -> str:
+
+    my_result_raw = (
+        game["white"]["result"]
+        if game["white"]["username"] == username
+        else game["black"]["result"]
+    )
+
+    result = (
+        "Win"
+        if my_result_raw == "win"
+        else (
+            "Draw"
+            if my_result_raw
+            in ["agreed", "stalemate", "repetition", "timeout vs insufficient"]
+            else "Loss"
+        )
+    )
+
+    return result
 
 
 def construct_move_seq(pgn) -> str:
@@ -211,7 +218,11 @@ def load_chess_games(username: str = MY_CHESS_USERNAME) -> list:
 
 
 def process_and_save_chess_data(
-    all_games=None, username=MY_CHESS_USERNAME, verbose=True, format="csv"
+    all_games=None,
+    username=MY_CHESS_USERNAME,
+    verbose=True,
+    format="csv",
+    interactive_opening_mapping=False,
 ):
     """
     Process raw chess games into dataframes and save to disk.
@@ -228,6 +239,11 @@ def process_and_save_chess_data(
         Print progress updates
     format : str
         Format to save ("parquet", "feather", "csv")
+    interactive_opening_mapping : bool, default False
+        If True, prompts on stdin to name any opening not already in
+        data/openings.json (and persists it there). Keep False for
+        unattended/notebook batch runs so an unmapped opening can't block
+        waiting for input; a best-effort name is used instead.
 
     Returns:
     --------
@@ -271,7 +287,7 @@ def process_and_save_chess_data(
 
             ts = game["end_time"]
             dt = datetime.fromtimestamp(ts, tz=ZoneInfo("UTC"))
-            dt_cest = dt.astimezone(ZoneInfo("Europe/Amsterdam"))
+            dt_local = dt.astimezone(ZoneInfo(TIMEZONE))
 
             my_color = "White" if game["white"]["username"] == username else "Black"
 
@@ -286,8 +302,6 @@ def process_and_save_chess_data(
                 white_rating = game["white"]["rating"]
                 black_rating = game["black"]["rating"]
                 rating_diff = None
-
-            result, raw_result = extract_result(game, username)
 
             # Game level data
             games_rows.append(
@@ -304,18 +318,19 @@ def process_and_save_chess_data(
                     "black_rating": black_rating,
                     "rating_diff": rating_diff,
                     "opening": opening_name,
-                    "simple_opening": simplify_opening(opening_name),
+                    "simple_opening": simplify_opening(
+                        opening_name, interactive=interactive_opening_mapping
+                    ),
                     "eco_code": extract_eco_code(pgn),
                     "my_color": my_color,
-                    "result": result,
-                    "raw_result": raw_result,
+                    "result": extract_result(game),
                     "white_accuracy": (
                         game["accuracies"]["white"] if "accuracies" in game else None
                     ),
                     "black_accuracy": (
                         game["accuracies"]["black"] if "accuracies" in game else None
                     ),
-                    "Time": dt_cest,
+                    "Time": dt_local,
                     "end_time": ts,
                     "moves": construct_move_seq(pgn),
                 }
@@ -343,7 +358,7 @@ def process_and_save_chess_data(
                                     "link_id": game["url"].split("/")[-1],
                                     "time_class": game["time_class"],
                                     "time_control": game["time_control"],
-                                    "move_no": int(move_no),
+                                    "move_no": move_no,
                                     "move_index": move_index,
                                     "turn": turn,
                                     "move": move_text,
@@ -476,6 +491,12 @@ def load_chess_dataframes(username, format=None) -> tuple[pd.DataFrame, pd.DataF
             else:
                 continue
 
+            if fmt == "csv":
+                # CSV loses dtype info; parquet/feather preserve it natively.
+                # utc=True avoids a pandas error/warning from mixed UTC
+                # offsets across the year (daylight saving time changes).
+                games_df["Time"] = pd.to_datetime(games_df["Time"], utc=True)
+
             print(
                 f"✓ Loaded {len(games_df)} games and {len(moves_df)} moves from {fmt} files"
             )
@@ -492,7 +513,7 @@ def load_chess_dataframes(username, format=None) -> tuple[pd.DataFrame, pd.DataF
 # MAIN FUNCTION
 # ============================================================================
 def get_chess_dataframes(
-    username=MY_CHESS_USERNAME, force_reprocess=False, format="csv", verbose=True
+    username=MY_CHESS_USERNAME, force_reprocess=False, format="parquet", verbose=True
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Smart function that loads existing dataframes or processes them if needed.

@@ -2,6 +2,7 @@
 # IMPORTS & CONFIGURATION
 # ============================================================================
 import json
+import os
 import chess.engine
 import sys
 from pathlib import Path
@@ -49,16 +50,21 @@ def classify_move(delta: int) -> str:
         return "Blunder"
 
 
-def is_blunder(delta: int) -> int:
-    """Return 1 if delta indicates blunder else 0"""
-    return int(delta < MISTAKE_LL)
+def is_blunder(delta: int) -> bool:
+    """Return True if delta indicates a blunder (mover-perspective loss past MISTAKE_LL)."""
+    return bool(delta < MISTAKE_LL)
 
 
-def save_cache(cache) -> None:
-    """Save evaluations cache to JSON file."""
-    with open(CACHE_FILE, "w", encoding="utf-8") as f:
+def save_cache(cache: dict) -> None:
+    """Save evaluations cache to JSON file.
+
+    Writes to a temporary file first and atomically replaces the real cache
+    file, so a crash mid-write can't corrupt previously cached evaluations.
+    """
+    tmp_path = CACHE_FILE.with_suffix(".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(cache, f, indent=2)
-    return None
+    os.replace(tmp_path, CACHE_FILE)
 
 
 def load_evaluation_cache() -> dict:
@@ -76,13 +82,17 @@ def load_evaluation_cache() -> dict:
         return {}
 
 
-def get_cache_key(game_id, move_no, turn) -> str:
+def get_cache_key(game_id: str, move_no, turn: str) -> str:
     """Create unique key for each evaluation."""
     return f"{game_id}_{move_no}_{turn}"
 
 
-def should_compute(cache, cache_key, given_depth):
-    """Check if we need to compute this position."""
+def should_compute(cache: dict, cache_key: str, given_depth: int) -> bool:
+    """Check whether a position needs to be (re-)computed.
+
+    True if the key is missing from the cache, or cached at a shallower depth
+    than requested.
+    """
     if cache_key not in cache:
         return True
     return cache[cache_key]["depth"] < given_depth
@@ -148,7 +158,6 @@ def run_chess_analysis(
     # PROCESS
     # -----------------------------
     rows = []
-
     with tqdm(
         total=len(moves), desc="Analyzing moves", unit="move", colour="RED"
     ) as pbar:
@@ -156,7 +165,6 @@ def run_chess_analysis(
             board = chess.Board()
             game_df = game_df.sort_values("move_index", ascending=True)
             eval_current = 0
-            clock_before, clock_after = {}, {}
 
             for _, row in game_df.iterrows():
                 eval_before = eval_current
@@ -214,35 +222,14 @@ def run_chess_analysis(
                     )
                 )
 
-                total_time = float(row["time_control"].split("+")[0])
-                increment = (
-                    float(row["time_control"].split("+")[1])
-                    if "+" in row["time_control"]
-                    else 0
-                )
-
-                turn = row["turn"]
-
-                clock_before[turn] = (
-                    clock_after.get(turn) if row["move_no"] != 1 else total_time
-                )
-
-                clock_after[turn] = row["clock_sec"]
-
                 rows.append(
                     {
                         "link_id": row["link_id"],
                         "uuid": game_id,
                         "move_index": row["move_index"],
-                        "move_no": int(row["move_no"]),
-                        "player": turn,
+                        "move_no": row["move_no"],
+                        "player": row["turn"],
                         "move": row["move"],
-                        "clock_before": clock_before.get(turn),
-                        "clock_after": clock_after.get(turn),
-                        "thinking_time": round(
-                            clock_before.get(turn) - clock_after.get(turn) + increment,
-                            2,
-                        ),
                         "my_move": is_my_move,
                         "eval_before": eval_before,
                         "eval_after": eval_after,
@@ -288,6 +275,15 @@ def run_chess_analysis(
 def filter_games_by_time_control(
     games_df: pd.DataFrame, time_control: str = None
 ) -> pd.DataFrame:
+    """Filter games by time_class (e.g. 'blitz', 'bullet', 'rapid').
+
+    Parameters
+    ----------
+    games_df : pd.DataFrame
+        Games dataframe with a 'time_class' column.
+    time_control : str, optional
+        Value to filter on. If None, returns games_df unchanged.
+    """
     if time_control is None:
         return games_df
 
@@ -295,12 +291,12 @@ def filter_games_by_time_control(
         return games_df[games_df["time_class"] == time_control]
     else:
         print("❌ time_control not found")
-        print("Available time_control values:", games_df["time_control"].unique())
-        return pd.DataFrame()
+        print("Available time_class values:", games_df["time_class"].unique())
+        return games_df.iloc[0:0]
 
 
-def take_last_n_games(df: pd.DataFrame, n_games: int) -> pd.DataFrame:
-    # Drop duplicates based on 'uuid' and keep the row with the most recent end_time
+def take_last_n_games(df: pd.DataFrame, n_games: int) -> pd.Series:
+    """Return the 'uuid' values of the n_games most recently played games in df."""
     df_sorted = df.sort_values("end_time", ascending=False)
     return (df_sorted.iloc[:n_games])["uuid"]
 

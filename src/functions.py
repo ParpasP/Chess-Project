@@ -1,4 +1,5 @@
 import chess.engine
+import chess.svg
 import ipywidgets as widgets
 from IPython.display import display, SVG, HTML, clear_output
 import matplotlib.pyplot as plt
@@ -11,49 +12,27 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import *
 
+# -----------------------------
+# ENGINE (module-level, reused across calls so widget callbacks
+# triggered after setup still have a live engine to query)
+# -----------------------------
+_engine = None
 
-def plot_game(result_df, link_id):
-    """
-    Plot the evaluation graph for a single game.
 
-    Creates a line chart showing how the engine evaluation changed throughout the game.
-    Positive values = White advantage, Negative values = Black advantage.
+def get_engine() -> chess.engine.SimpleEngine:
+    """Return a shared Stockfish engine instance, starting it if needed."""
+    global _engine
+    if _engine is None:
+        _engine = chess.engine.SimpleEngine.popen_uci(str(STOCKFISH_PATH))
+    return _engine
 
-    Parameters:
-    -----------
-    result_df : pd.DataFrame
-        DataFrame containing analysis results with 'move_index', 'eval_after', 'link_id' columns
-    link_id : str or int
-        Unique identifier for the game (from the game's URL)
 
-    Example:
-    --------
-    >>> plot_game(analysis_df, "12345678")
-    """
-    link_id = str(link_id)
-    game = result_df[result_df["link_id"] == link_id]
-    my_color = "white" if game.iloc[0]["my_move"] else "black"
-    print(f"You played as {my_color}")
-    x = game["move_index"].values
-    y = game["eval_after"].values
-
-    fig, ax = plt.subplots(figsize=(10, 4))
-
-    ax.plot(x, y, color="white", linewidth=0.01, zorder=3)
-
-    ax.set_xlim(x.min(), x.max())
-    ax.set_ylim(-1000, 1000)
-
-    ax.fill_between(x, y, 1000, color="black", alpha=0.8, zorder=1)
-
-    # optional reference
-    ax.axhline(0, color="grey", linewidth=1, zorder=4)
-
-    ax.set_title("Game review")
-    ax.set_xlabel("Move")
-    ax.set_ylabel("Evaluation")
-
-    plt.show()
+def close_engine() -> None:
+    """Shut down the shared engine instance, if one is running."""
+    global _engine
+    if _engine is not None:
+        _engine.quit()
+        _engine = None
 
 
 def get_best_move(board, engine):
@@ -194,7 +173,7 @@ def precompute_boards(game_df):
     return boards
 
 
-def interactive_game_viewer(result_df, link_id):
+def interactive_game_viewer(result_df, game_id):
     """
     Create an interactive board viewer for analyzing a specific game.
 
@@ -216,9 +195,13 @@ def interactive_game_viewer(result_df, link_id):
     >>> interactive_game_viewer(analysis_df, "abc123-def456")
     # Opens interactive widget - use the slider to move through the game
     """
-    game = result_df[result_df["link_id"] == link_id]
+    game = (
+        result_df[result_df["link_id"] == game_id]
+        .sort_values("move_index")
+        .reset_index(drop=True)
+    )
+
     boards = precompute_boards(game)
-    print(len(boards))
 
     def update(i):
         clear_output(wait=True)
@@ -284,21 +267,13 @@ def interactive_game_viewer(result_df, link_id):
         print(f"Delta: {row['delta']}")
         print(f"Type: {row['move_type']}")
 
-    engine = chess.engine.SimpleEngine.popen_uci(str(STOCKFISH_PATH))
+    engine = get_engine()
     widgets.interact(
         update, i=widgets.IntSlider(min=0, max=len(boards) - 1, step=1, value=0)
     )
-    engine.quit()
-
-
-import sys
-from pathlib import Path
-import pandas as pd
-import chess
-import chess.svg
-import chess.engine
-import ipywidgets as widgets
-from IPython.display import display, HTML, clear_output
+    # Note: engine is intentionally left open (shared, module-level) since
+    # the slider triggers `update()` asynchronously after this call returns.
+    # Call close_engine() when done viewing to release it.
 
 
 def eval_bar_horizontal(eval_cp, label=""):
